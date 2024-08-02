@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const INDENT_SIZE = 2;
 const StringMap = std.StringHashMap([]const u8);
 
 pub const Element = struct {
@@ -10,6 +11,10 @@ pub const Element = struct {
         try self.attributes.?.put(name, value);
     }
 };
+
+fn writeIndent(writer: anytype, n: usize) !void {
+    try writer.writeByteNTimes(' ', n * INDENT_SIZE);
+}
 
 pub const NamedElement = struct {
     name: []const u8,
@@ -47,7 +52,12 @@ pub const ElementCollection = struct {
         try self.list.append(.{ .name = name, .element = el });
     }
 
-    inline fn setNamed(self: *ElementCollection, field: []const u8, el: Element) !void {
+    inline fn setNamed(
+        self: *ElementCollection,
+        comptime replace: bool,
+        field: []const u8,
+        el: Element,
+    ) !void {
         for (self.list.items, 0..) |item, i| {
             if (std.mem.eql(u8, item.name, field)) {
                 _ = self.list.swapRemove(i);
@@ -55,20 +65,30 @@ pub const ElementCollection = struct {
                 return;
             }
         }
-        return error.UnknownElement;
+        if (replace) {
+            return error.UnknownElement;
+        } else {
+            try self.list.append(.{ .name = field, .element = el });
+        }
     }
 
     pub fn set(self: *ElementCollection, name: []const u8, el: Element) !void {
-        try self.setNamed(name, el);
+        try self.setNamed(true, name, el);
     }
 
-    pub fn write(self: *ElementCollection, writer: anytype) !void {
+    pub fn addOrSet(self: *ElementCollection, name: []const u8, el: Element) !void {
+        try self.setNamed(false, name, el);
+    }
+
+    pub fn write(self: *const ElementCollection, writer: anytype, indent: usize) !void {
         if (self.list.items.len > 0) {
+            try writeIndent(writer, indent);
             try self.list.items[0].write(writer);
         }
         if (self.list.items.len > 1) {
             for (self.list.items[1..]) |item| {
                 try writer.writeByte('\n');
+                try writeIndent(writer, indent);
                 try item.write(writer);
             }
         }
@@ -79,6 +99,9 @@ pub const Entry = struct {
     elements: *ElementCollection,
     allocator: std.mem.Allocator,
 
+    pub fn addOrSet(self: *Entry, name: []const u8, el: Element) !void {
+        try self.elements.addOrSet(name, el);
+    }
     pub fn set(self: *Entry, name: []const u8, el: Element) !void {
         try self.elements.set(name, el);
     }
@@ -86,16 +109,16 @@ pub const Entry = struct {
         try self.elements.add(name, el);
     }
     pub fn setAuthor(self: *Entry, text: []const u8) !void {
-        try self.set("author", .{ .text = text });
+        try self.addOrSet("author", .{ .text = text });
     }
     pub fn setTitle(self: *Entry, text: []const u8) !void {
-        try self.set("title", .{ .text = text });
+        try self.addOrSet("title", .{ .text = text });
     }
     pub fn setPublished(self: *Entry, text: []const u8) !void {
-        try self.set("published", .{ .text = text });
+        try self.addOrSet("published", .{ .text = text });
     }
     pub fn setId(self: *Entry, text: []const u8) !void {
-        try self.set("id", .{ .text = text });
+        try self.addOrSet("id", .{ .text = text });
     }
     pub fn newLink(self: *Entry, href: []const u8) !*Element {
         try self.add("link", .{});
@@ -134,7 +157,7 @@ test "entries" {
     try ptr.put("type", "text/html");
 
     var buffer = std.ArrayList(u8).init(alloc);
-    try entry.elements.write(buffer.writer());
+    try entry.elements.write(buffer.writer(), 0);
 
     try std.testing.expectEqualStrings(
         \\<author>Alan Sillitoe</author>
@@ -149,15 +172,19 @@ pub const Feed = struct {
     arena: std.heap.ArenaAllocator,
     entries: std.ArrayList(ElementCollection),
 
+    elements: ElementCollection,
+
     pub fn init(allocator: std.mem.Allocator) Feed {
         return .{
             .arena = std.heap.ArenaAllocator.init(allocator),
             .entries = std.ArrayList(ElementCollection).init(allocator),
+            .elements = .{ .list = ElementList.init(allocator) },
         };
     }
 
     pub fn deinit(self: *Feed) void {
         self.entries.deinit();
+        self.elements.list.deinit();
         self.arena.deinit();
         self.* = undefined;
     }
@@ -165,8 +192,52 @@ pub const Feed = struct {
     pub fn newEntry(self: *Feed) !Entry {
         const ptr = try self.entries.addOne();
         const alloc = self.arena.allocator();
-        ptr.elements = ElementList.init(alloc);
+        ptr.list = ElementList.init(alloc);
         return .{ .elements = ptr, .allocator = alloc };
+    }
+
+    pub fn write(self: *const Feed, writer: anytype) !void {
+        var indent: usize = 0;
+        try writer.writeAll("<feed xmlns=\"http://www.w3.org/2005/Atom\">\n");
+        indent += 1;
+        try self.elements.write(writer, indent);
+
+        for (self.entries.items) |entry| {
+            try writer.writeByte('\n');
+            try writeIndent(writer, indent);
+
+            try writer.writeAll("<entry>\n");
+            try entry.write(writer, indent + 1);
+
+            try writer.writeByte('\n');
+            try writeIndent(writer, indent);
+            try writer.writeAll("</entry>");
+        }
+
+        try writer.writeAll("\n</feed>");
+    }
+
+    pub fn addOrSet(self: *Feed, name: []const u8, el: Element) !void {
+        try self.elements.addOrSet(name, el);
+    }
+    pub fn set(self: *Feed, name: []const u8, el: Element) !void {
+        try self.elements.set(name, el);
+    }
+    pub fn add(self: *Feed, name: []const u8, el: Element) !void {
+        try self.elements.add(name, el);
+    }
+    pub fn setAuthor(self: *Feed, text: []const u8) !void {
+        try self.addOrSet("author", .{ .text = text });
+    }
+    pub fn setTitle(self: *Feed, text: []const u8) !void {
+        try self.addOrSet("title", .{ .text = text });
+    }
+    pub fn newLink(self: *Feed, href: []const u8) !*Element {
+        try self.add("link", .{});
+        const ptr = &self.elements.list.items[self.elements.list.items.len - 1];
+        ptr.element.attributes = StringMap.init(self.allocator);
+        ptr.element.text = href;
+        return &ptr.element;
     }
 };
 
@@ -175,4 +246,31 @@ test "feed" {
 
     var feed = Feed.init(alloc);
     defer feed.deinit();
+
+    try feed.setTitle("Books");
+    try feed.setAuthor("Fergus");
+
+    try std.testing.expectEqual(2, feed.elements.list.items.len);
+
+    var entry = try feed.newEntry();
+    try entry.setAuthor("Shelagh Delaney");
+    try entry.setTitle("Taste of Honey");
+
+    var buffer = std.ArrayList(u8).init(alloc);
+    defer buffer.deinit();
+
+    try feed.write(buffer.writer());
+
+    try std.testing.expectEqualStrings(
+        \\<feed xmlns="http://www.w3.org/2005/Atom">
+        \\  <title>Books</title>
+        \\  <author>Fergus</author>
+        \\  <entry>
+        \\    <author>Shelagh Delaney</author>
+        \\    <title>Taste of Honey</title>
+        \\  </entry>
+        \\</feed>
+    ,
+        buffer.items,
+    );
 }
