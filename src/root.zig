@@ -120,6 +120,13 @@ pub const Entry = struct {
     pub fn setId(self: *Entry, text: []const u8) !void {
         try self.addOrSet("id", .{ .text = text });
     }
+    pub fn newField(self: *Entry, name: []const u8, text: []const u8) !*Element {
+        try self.add(name, .{});
+        const ptr = &self.elements.list.items[self.elements.list.items.len - 1];
+        ptr.element.attributes = StringMap.init(self.allocator);
+        ptr.element.text = text;
+        return &ptr.element;
+    }
     pub fn newLink(self: *Entry, href: []const u8) !*Element {
         try self.add("link", .{});
         const ptr = &self.elements.list.items[self.elements.list.items.len - 1];
@@ -256,6 +263,9 @@ test "feed" {
     try entry.setAuthor("Shelagh Delaney");
     try entry.setTitle("Taste of Honey");
 
+    const ptr = try entry.newField("content", "Hello World");
+    try ptr.put("type", "text/html");
+
     var buffer = std.ArrayList(u8).init(alloc);
     defer buffer.deinit();
 
@@ -268,6 +278,7 @@ test "feed" {
         \\  <entry>
         \\    <author>Shelagh Delaney</author>
         \\    <title>Taste of Honey</title>
+        \\    <content type="text/html">Hello World</content>
         \\  </entry>
         \\</feed>
     ,
