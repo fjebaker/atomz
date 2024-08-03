@@ -109,7 +109,12 @@ pub const Entry = struct {
         try self.elements.add(name, el);
     }
     pub fn setAuthor(self: *Entry, text: []const u8) !void {
-        try self.addOrSet("author", .{ .text = text });
+        const full_author = try std.mem.concat(
+            self.allocator,
+            u8,
+            &.{ "<name>", text, "</name>" },
+        );
+        try self.addOrSet("author", .{ .text = full_author });
     }
     pub fn setTitle(self: *Entry, text: []const u8) !void {
         try self.addOrSet("title", .{ .text = text });
@@ -132,7 +137,6 @@ pub const Entry = struct {
         const ptr = &self.elements.list.items[self.elements.list.items.len - 1];
         ptr.element.attributes = StringMap.init(self.allocator);
         try ptr.element.put("href", href);
-        ptr.element.text = href;
         return &ptr.element;
     }
 
@@ -185,7 +189,7 @@ test "entries" {
         error.UnknownElement,
         entry.set("author", .{ .text = "Alan Sillitoe" }),
     );
-    try entry.add("author", .{ .text = "Alan Sillitoe" });
+    try entry.add("author", .{ .text = "<name>Alan Sillitoe</name>" });
     try entry.add("title", .{ .text = "Sunday Night, Saturday Morning" });
     try entry.set("title", .{ .text = "Saturday Night, Sunday Morning" });
     try std.testing.expectEqual(2, entry.count());
@@ -197,9 +201,9 @@ test "entries" {
     try entry.elements.write(buffer.writer(), 0);
 
     try std.testing.expectEqualStrings(
-        \\<author>Alan Sillitoe</author>
+        \\<author><name>Alan Sillitoe</name></author>
         \\<title>Saturday Night, Sunday Morning</title>
-        \\<link href="https://wikipedia.org" type="text/html">https://wikipedia.org</link>
+        \\<link href="https://wikipedia.org" type="text/html"/>
     ,
         buffer.items,
     );
@@ -212,7 +216,7 @@ test "entries" {
 
     const author = (try entry.get("author")).?;
     try std.testing.expectEqualStrings(
-        "Alan Sillitoe",
+        "<name>Alan Sillitoe</name>",
         author.text.?,
     );
 }
@@ -293,7 +297,12 @@ pub const Feed = struct {
         try self.elements.add(name, el);
     }
     pub fn setAuthor(self: *Feed, text: []const u8) !void {
-        try self.addOrSet("author", .{ .text = text });
+        const full_author = try std.mem.concat(
+            self.arena.allocator(),
+            u8,
+            &.{ "<name>", text, "</name>" },
+        );
+        try self.addOrSet("author", .{ .text = full_author });
     }
     pub fn setTitle(self: *Feed, text: []const u8) !void {
         try self.addOrSet("title", .{ .text = text });
@@ -306,7 +315,6 @@ pub const Feed = struct {
         const ptr = &self.elements.list.items[self.elements.list.items.len - 1];
         ptr.element.attributes = StringMap.init(self.arena.allocator());
         try ptr.element.put("href", href);
-        ptr.element.text = href;
         return &ptr.element;
     }
 };
@@ -337,9 +345,9 @@ test "feed" {
     try std.testing.expectEqualStrings(
         \\<feed xmlns="http://www.w3.org/2005/Atom">
         \\  <title>Books</title>
-        \\  <author>Fergus</author>
+        \\  <author><name>Fergus</name></author>
         \\  <entry>
-        \\    <author>Shelagh Delaney</author>
+        \\    <author><name>Shelagh Delaney</name></author>
         \\    <title>Taste of Honey</title>
         \\    <content type="text/html">Hello World</content>
         \\  </entry>
