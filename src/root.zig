@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const INDENT_SIZE = 2;
-const StringMap = std.StringHashMap([]const u8);
+const StringMap = std.StringArrayHashMap([]const u8);
 
 pub const Element = struct {
     attributes: ?StringMap = null,
@@ -219,19 +219,21 @@ test "entries" {
 pub const Feed = struct {
     arena: std.heap.ArenaAllocator,
     entries: std.ArrayList(ElementCollection),
-
+    attributes: StringMap,
     elements: ElementCollection,
 
     pub fn init(allocator: std.mem.Allocator) Feed {
         return .{
             .arena = std.heap.ArenaAllocator.init(allocator),
             .entries = std.ArrayList(ElementCollection).init(allocator),
+            .attributes = StringMap.init(allocator),
             .elements = .{ .list = ElementList.init(allocator) },
         };
     }
 
     pub fn deinit(self: *Feed) void {
         self.entries.deinit();
+        self.attributes.deinit();
         self.elements.list.deinit();
         self.arena.deinit();
         self.* = undefined;
@@ -244,9 +246,24 @@ pub const Feed = struct {
         return .{ .elements = ptr, .allocator = alloc };
     }
 
+    pub fn putDefaultAttributes(self: *Feed) !void {
+        try self.attributes.put("xmlns:thr", "http://purl.org/syndication/thread/1.0");
+        try self.attributes.put("xmlns:georss", "http://www.georss.org/georss");
+        try self.attributes.put("xmlns:geo", "http://www.w3.org/2003/01/geo/wgs84_pos#");
+        try self.attributes.put("xml:lang", "en-UK");
+    }
+
     pub fn write(self: *const Feed, writer: anytype) !void {
         var indent: usize = 0;
-        try writer.writeAll("<feed xmlns=\"http://www.w3.org/2005/Atom\">\n");
+        try writer.writeAll("<feed xmlns=\"http://www.w3.org/2005/Atom\"");
+        var itt = self.attributes.iterator();
+        while (itt.next()) |i| {
+            try writer.print(
+                " {s}=\"{s}\"",
+                .{ i.key_ptr.*, i.value_ptr.* },
+            );
+        }
+        try writer.writeAll(">\n");
         indent += 1;
         try self.elements.write(writer, indent);
 
@@ -279,6 +296,9 @@ pub const Feed = struct {
     }
     pub fn setTitle(self: *Feed, text: []const u8) !void {
         try self.addOrSet("title", .{ .text = text });
+    }
+    pub fn setId(self: *Feed, text: []const u8) !void {
+        try self.addOrSet("id", .{ .text = text });
     }
     pub fn newLink(self: *Feed, href: []const u8) !*Element {
         try self.add("link", .{});
