@@ -138,6 +138,35 @@ pub const Entry = struct {
     pub fn count(self: *const Entry) usize {
         return self.elements.list.items.len;
     }
+
+    pub fn get(self: *const Entry, key: []const u8) !?*const Element {
+        return self.getPtr(key);
+    }
+
+    pub fn getFirst(self: *const Entry, key: []const u8) ?*const Element {
+        return self.getFirstPtr(key);
+    }
+
+    pub fn getPtr(self: *const Entry, key: []const u8) !?*Element {
+        var element: ?*NamedElement = null;
+        for (self.elements.list.items) |*item| {
+            if (std.mem.eql(u8, item.name, key)) {
+                if (element != null) return error.DuplicateKey;
+                element = item;
+            }
+        }
+        const ptr = element orelse return null;
+        return &ptr.element;
+    }
+
+    pub fn getFirstPtr(self: *const Entry, key: []const u8) ?*Element {
+        for (self.elements.list.items) |*item| {
+            if (std.mem.eql(u8, item.name, key)) {
+                return &item.element;
+            }
+        }
+        return null;
+    }
 };
 
 test "entries" {
@@ -172,6 +201,18 @@ test "entries" {
         \\<link type="text/html">https://wikipedia.org</link>
     ,
         buffer.items,
+    );
+
+    const title_ptr = entry.getFirstPtr("title").?;
+    try std.testing.expectEqualStrings(
+        "Saturday Night, Sunday Morning",
+        title_ptr.text.?,
+    );
+
+    const author = (try entry.get("author")).?;
+    try std.testing.expectEqualStrings(
+        "Alan Sillitoe",
+        author.text.?,
     );
 }
 
