@@ -131,6 +131,7 @@ pub const Entry = struct {
         try self.add("link", .{});
         const ptr = &self.elements.list.items[self.elements.list.items.len - 1];
         ptr.element.attributes = StringMap.init(self.allocator);
+        try ptr.element.put("href", href);
         ptr.element.text = href;
         return &ptr.element;
     }
@@ -198,7 +199,7 @@ test "entries" {
     try std.testing.expectEqualStrings(
         \\<author>Alan Sillitoe</author>
         \\<title>Saturday Night, Sunday Morning</title>
-        \\<link type="text/html">https://wikipedia.org</link>
+        \\<link href="https://wikipedia.org" type="text/html">https://wikipedia.org</link>
     ,
         buffer.items,
     );
@@ -250,7 +251,7 @@ pub const Feed = struct {
         try self.attributes.put("xmlns:thr", "http://purl.org/syndication/thread/1.0");
         try self.attributes.put("xmlns:georss", "http://www.georss.org/georss");
         try self.attributes.put("xmlns:geo", "http://www.w3.org/2003/01/geo/wgs84_pos#");
-        try self.attributes.put("xml:lang", "en-UK");
+        try self.attributes.put("xml:lang", "en-GB");
     }
 
     pub fn write(self: *const Feed, writer: anytype) !void {
@@ -303,7 +304,8 @@ pub const Feed = struct {
     pub fn newLink(self: *Feed, href: []const u8) !*Element {
         try self.add("link", .{});
         const ptr = &self.elements.list.items[self.elements.list.items.len - 1];
-        ptr.element.attributes = StringMap.init(self.allocator);
+        ptr.element.attributes = StringMap.init(self.arena.allocator());
+        try ptr.element.put("href", href);
         ptr.element.text = href;
         return &ptr.element;
     }
