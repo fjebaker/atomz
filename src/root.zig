@@ -12,8 +12,8 @@ pub const Element = struct {
     }
 };
 
-fn writeIndent(writer: anytype, n: usize) !void {
-    try writer.writeByteNTimes(' ', n * INDENT_SIZE);
+fn writeIndent(writer: *std.Io.Writer, n: usize) !void {
+    try writer.splatByteAll(' ', n * INDENT_SIZE);
 }
 
 pub const NamedElement = struct {
@@ -47,9 +47,11 @@ pub const NamedElement = struct {
 const ElementList = std.ArrayList(NamedElement);
 
 pub const ElementCollection = struct {
-    list: ElementList,
+    list: ElementList = .empty,
+    allocator: std.mem.Allocator,
+
     pub fn add(self: *ElementCollection, name: []const u8, el: Element) !void {
-        try self.list.append(.{ .name = name, .element = el });
+        try self.list.append(self.allocator, .{ .name = name, .element = el });
     }
 
     inline fn setNamed(
@@ -61,14 +63,14 @@ pub const ElementCollection = struct {
         for (self.list.items, 0..) |item, i| {
             if (std.mem.eql(u8, item.name, field)) {
                 _ = self.list.swapRemove(i);
-                try self.list.insert(i, .{ .name = field, .element = el });
+                try self.list.insert(self.allocator, i, .{ .name = field, .element = el });
                 return;
             }
         }
         if (replace) {
             return error.UnknownElement;
         } else {
-            try self.list.append(.{ .name = field, .element = el });
+            try self.list.append(self.allocator, .{ .name = field, .element = el });
         }
     }
 
@@ -179,7 +181,7 @@ test "entries" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var element_list: ElementCollection = .{ .list = ElementList.init(alloc) };
+    var element_list: ElementCollection = .{ .allocator = alloc };
     var entry = Entry{
         .elements = &element_list,
         .allocator = alloc,
@@ -197,8 +199,9 @@ test "entries" {
     const ptr = try entry.newLink("https://wikipedia.org");
     try ptr.put("type", "text/html");
 
-    var buffer = std.ArrayList(u8).init(alloc);
-    try entry.elements.write(buffer.writer(), 0);
+    var buffer = std.ArrayList(u8).empty;
+    var buffer_writer = buffer.writer(alloc).adaptToNewApi(&.{});
+    try entry.elements.write(&buffer_writer.new_interface, 0);
 
     try std.testing.expectEqualStrings(
         \\<author><name>Alan Sillitoe</name></author>
@@ -223,31 +226,30 @@ test "entries" {
 
 pub const Feed = struct {
     arena: std.heap.ArenaAllocator,
-    entries: std.ArrayList(ElementCollection),
+    entries: std.ArrayList(ElementCollection) = .empty,
     attributes: StringMap,
     elements: ElementCollection,
 
     pub fn init(allocator: std.mem.Allocator) Feed {
         return .{
             .arena = std.heap.ArenaAllocator.init(allocator),
-            .entries = std.ArrayList(ElementCollection).init(allocator),
             .attributes = StringMap.init(allocator),
-            .elements = .{ .list = ElementList.init(allocator) },
+            .elements = .{ .allocator = allocator },
         };
     }
 
     pub fn deinit(self: *Feed) void {
-        self.entries.deinit();
         self.attributes.deinit();
-        self.elements.list.deinit();
+        self.elements.list.deinit(self.elements.allocator);
         self.arena.deinit();
         self.* = undefined;
     }
 
     pub fn newEntry(self: *Feed) !Entry {
-        const ptr = try self.entries.addOne();
         const alloc = self.arena.allocator();
-        ptr.list = ElementList.init(alloc);
+        const ptr = try self.entries.addOne(alloc);
+        ptr.list = .empty;
+        ptr.allocator = alloc;
         return .{ .elements = ptr, .allocator = alloc };
     }
 
@@ -337,10 +339,12 @@ test "feed" {
     const ptr = try entry.newField("content", "Hello World");
     try ptr.put("type", "text/html");
 
-    var buffer = std.ArrayList(u8).init(alloc);
-    defer buffer.deinit();
+    var buffer = std.ArrayList(u8).empty;
+    defer buffer.deinit(alloc);
 
-    try feed.write(buffer.writer());
+    var buffer_writer = buffer.writer(alloc).adaptToNewApi(&.{});
+
+    try feed.write(&buffer_writer.new_interface);
 
     try std.testing.expectEqualStrings(
         \\<feed xmlns="http://www.w3.org/2005/Atom">
